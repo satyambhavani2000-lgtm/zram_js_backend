@@ -1,0 +1,38 @@
+import { Sequelize } from "sequelize";
+import { DB_NAME } from "../constants.js";
+
+const sequelize = new Sequelize(
+    process.env.DB_NAME || DB_NAME, 
+    process.env.DB_USER, 
+    process.env.DB_PASSWORD, 
+    {
+        host: process.env.DB_SERVER,
+        dialect: 'mssql',
+        dialectOptions: {
+            options: {
+                encrypt: true,
+                trustServerCertificate: true
+            }
+        },
+        logging: false
+    }
+);
+
+const connectDB = async () => {
+    try {
+        await sequelize.authenticate();
+        console.log(`\n SQL Server connected !! DB HOST: ${process.env.DB_SERVER}`);
+        
+        // Sync models (In production, use migrations instead)
+        if (process.env.NODE_ENV !== 'production') {
+            await sequelize.sync({ alter: true });
+            console.log("All models were synchronized successfully.");
+        }
+    } catch (error) {
+        console.log("SQL SERVER connection FAILED ", error);
+        process.exit(1)
+    }
+}
+
+export { sequelize };
+export default connectDB;
