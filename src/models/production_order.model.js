@@ -39,7 +39,12 @@ ProductionOrder.init({
     status: {
         type: DataTypes.ENUM('OPEN', 'IN_PROGRESS', 'ON_HOLD', 'DELIVERED', 'CANCELLED'),
         defaultValue: 'OPEN'
+    },
+    materialId: {
+        type: DataTypes.UUID,
+        allowNull: false
     }
+
 }, {
     sequelize,
     modelName: 'ProductionOrder'

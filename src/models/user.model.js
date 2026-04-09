@@ -8,14 +8,15 @@ class User extends Model {
         return await bcrypt.compare(password, this.password);
     }
 
-    generateAccessToken() {
+    generateAccessToken(companyId, rights) {
         return jwt.sign(
             {
                 id: this.id,
-                email: this.email,
                 username: this.username,
                 fullName: this.fullName,
-                role: this.role
+                role: this.role,
+                companyId,
+                rights
             },
             process.env.ACCESS_TOKEN_SECRET,
             {
@@ -23,6 +24,7 @@ class User extends Model {
             }
         );
     }
+
 
     generateRefreshToken() {
         return jwt.sign(
@@ -52,15 +54,7 @@ User.init({
             notEmpty: true
         }
     },
-    email: {
-        type: DataTypes.STRING,
-        allowNull: false,
-        unique: true,
-        lowercase: true,
-        validate: {
-            isEmail: true
-        }
-    },
+
     fullName: {
         type: DataTypes.STRING,
         allowNull: false,

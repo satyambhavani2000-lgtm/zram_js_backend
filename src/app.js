@@ -19,10 +19,41 @@ app.use(cookieParser())
 import userRouter from './routes/user.routes.js'
 import inventoryRouter from "./routes/inventory.routes.js"
 import productionRouter from "./routes/production.routes.js"
+import dashboardRouter from "./routes/dashboard.routes.js"
+import companyRouter from "./routes/company.routes.js"
+import menuRouter from "./routes/menu.routes.js"
+
+
 
 //routes declaration
 app.use("/api/v1/users", userRouter)
 app.use("/api/v1/inventory", inventoryRouter)
 app.use("/api/v1/production", productionRouter)
+app.use("/api/v1/dashboard", dashboardRouter)
+app.use("/api/v1/companies", companyRouter)
+app.use("/api/v1/menu", menuRouter)
+
+
 
 export { app }
+
+// Global error handler
+import { ApiError } from "./utils/ApiError.js"
+
+app.use((err, req, res, next) => {
+    if (err instanceof ApiError) {
+        return res.status(err.statusCode).json({
+            success: false,
+            message: err.message,
+            errors: err.errors,
+            data: null
+        });
+    }
+
+    return res.status(500).json({
+        success: false,
+        message: "Something went wrong! Internal Server Error.",
+        errors: [err.message],
+        data: null
+    });
+});

@@ -27,7 +27,8 @@ const createOrder = asyncHandler(async (req, res) => {
             designCode,
             issuedWeight,
             customerName,
-            targetDate
+            targetDate,
+            materialId
         }, { transaction: t });
 
         material.currentStock = parseFloat(material.currentStock) - parseFloat(issuedWeight);
