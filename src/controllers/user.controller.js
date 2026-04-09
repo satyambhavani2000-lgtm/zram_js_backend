@@ -5,11 +5,13 @@ import { uploadOnCloudinary } from "../utils/cloudinary.js";
 import { ApiResponse } from "../utils/ApiResponse.js";
 import jwt from "jsonwebtoken";
 import { Op } from "sequelize";
+import { UserCompany } from "../models/userCompany.model.js";
 
-const generateAccessAndRefereshTokens = async (userId) => {
+
+const generateAccessAndRefereshTokens = async (userId, companyId, rights) => {
     try {
         const user = await User.findByPk(userId);
-        const accessToken = user.generateAccessToken();
+        const accessToken = user.generateAccessToken(companyId, rights);
         const refreshToken = user.generateRefreshToken();
 
         user.refreshToken = refreshToken;
@@ -17,9 +19,10 @@ const generateAccessAndRefereshTokens = async (userId) => {
 
         return { accessToken, refreshToken };
     } catch (error) {
-        throw new ApiError(500, "Something went wrong while generating refresh and access token");
+        throw new ApiError(500, "Something went wrong while generating tokens");
     }
 };
+
 
 const registerUser = asyncHandler(async (req, res) => {
     const { fullName, email, username, password, role } = req.body;
@@ -59,7 +62,6 @@ const registerUser = asyncHandler(async (req, res) => {
         fullName,
         avatar: avatar.url,
         coverImage: coverImage?.url || "",
-        email,
         password,
         username: username.toLowerCase(),
         role: role || 'WORKER'
@@ -79,15 +81,21 @@ const registerUser = asyncHandler(async (req, res) => {
 });
 
 const loginUser = asyncHandler(async (req, res) => {
-    const { email, username, password } = req.body;
+    const { username, password, companyId } = req.body;
+
+    if (!companyId) {
+        throw new ApiError(400, "Company selection is required");
+    }
 
     if (!username && !email) {
         throw new ApiError(400, "username or email is required");
     }
 
+
+
     const user = await User.findOne({
         where: {
-            [Op.or]: [{ username: username || "" }, { email: email || "" }]
+            [Op.or]: [{ username: username || "" }]
         }
     });
 
@@ -101,11 +109,22 @@ const loginUser = asyncHandler(async (req, res) => {
         throw new ApiError(401, "Invalid user credentials");
     }
 
-    const { accessToken, refreshToken } = await generateAccessAndRefereshTokens(user.id);
-
     const loggedInUser = await User.findByPk(user.id, {
         attributes: { exclude: ['password', 'refreshToken'] }
     });
+
+    // Check if user is authorized for this company
+    const userCompany = await UserCompany.findOne({
+        where: { userId: user.id, companyId }
+    });
+
+    if (!userCompany) {
+        throw new ApiError(403, "No authorization. You are not registered with this company.");
+    }
+
+    // Generate tokens after company authorization
+    const { accessToken, refreshToken } = await generateAccessAndRefereshTokens(user.id, companyId, userCompany.rights);
+
 
     const options = {
         httpOnly: true,
@@ -119,9 +138,16 @@ const loginUser = asyncHandler(async (req, res) => {
         .json(
             new ApiResponse(
                 200,
-                { user: loggedInUser, accessToken, refreshToken },
+                {
+                    user: loggedInUser,
+                    accessToken,
+                    refreshToken,
+                    companyId: userCompany.companyId,
+                    rights: userCompany.rights
+                },
                 "User logged In Successfully"
             )
+
         );
 });
 
@@ -204,15 +230,14 @@ const getCurrentUser = asyncHandler(async (req, res) => {
 });
 
 const updateAccountDetails = asyncHandler(async (req, res) => {
-    const { fullName, email } = req.body;
+    const { fullName } = req.body;
 
-    if (!fullName || !email) {
+    if (!fullName) {
         throw new ApiError(400, "All fields are required");
     }
 
     const user = await User.findByPk(req.user?.id);
     user.fullName = fullName;
-    user.email = email;
     await user.save();
 
     const updatedUser = await User.findByPk(user.id, {

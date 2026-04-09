@@ -38,8 +38,13 @@ const updateStock = asyncHandler(async (req, res) => {
     if (action === 'ADD') {
         item.currentStock = parseFloat(item.currentStock) + parseFloat(quantity);
     } else if (action === 'SUBTRACT') {
-        item.currentStock = parseFloat(item.currentStock) - parseFloat(quantity);
+        const newStock = parseFloat(item.currentStock) - parseFloat(quantity);
+        if (newStock < 0) {
+            throw new ApiError(400, "Insufficient stock. Cannot subtract more than available.");
+        }
+        item.currentStock = newStock;
     }
+
 
     await item.save();
     return res.status(200).json(new ApiResponse(200, item, "Stock updated successfully"));
