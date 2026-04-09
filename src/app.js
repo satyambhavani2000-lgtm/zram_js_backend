@@ -21,6 +21,7 @@ import inventoryRouter from "./routes/inventory.routes.js"
 import productionRouter from "./routes/production.routes.js"
 import dashboardRouter from "./routes/dashboard.routes.js"
 import companyRouter from "./routes/company.routes.js"
+import menuRouter from "./routes/menu.routes.js"
 
 
 
@@ -30,6 +31,7 @@ app.use("/api/v1/inventory", inventoryRouter)
 app.use("/api/v1/production", productionRouter)
 app.use("/api/v1/dashboard", dashboardRouter)
 app.use("/api/v1/companies", companyRouter)
+app.use("/api/v1/menu", menuRouter)
 
 
 
