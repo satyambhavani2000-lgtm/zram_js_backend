@@ -10,9 +10,10 @@ const sequelize = new Sequelize(
         dialect: 'mssql',
         dialectOptions: {
             options: {
-                encrypt: true,
+                encrypt: false,
                 trustServerCertificate: true
             }
+
         },
         logging: false
     }
@@ -21,7 +22,8 @@ const sequelize = new Sequelize(
 const connectDB = async () => {
     try {
         await sequelize.authenticate();
-        console.log(`\n SQL Server connected !! DB HOST: ${process.env.DB_SERVER}`);
+        console.log(`\n SQL Server connected !! DB HOST: ${process.env.DB_SERVER} | DATABASE: ${process.env.DB_DATABASE}`);
+
         
         // Controlled synchronization
         if (process.env.DB_SYNC === 'true') {

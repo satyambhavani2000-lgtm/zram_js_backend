@@ -49,37 +49,42 @@ User.init({
         type: DataTypes.STRING,
         allowNull: false,
         unique: true,
-        lowercase: true,
-        validate: {
-            notEmpty: true
-        }
+        lowercase: true
     },
-
+    email: {
+        type: DataTypes.STRING,
+        allowNull: true
+    },
     fullName: {
         type: DataTypes.STRING,
         allowNull: false,
+        field: 'full_name'
     },
     avatar: {
-        type: DataTypes.STRING, // cloudinary url
-        allowNull: false
-    },
-    coverImage: {
-        type: DataTypes.STRING, // cloudinary url
+        type: DataTypes.STRING,
+        field: 'avatar_url'
     },
     password: {
         type: DataTypes.STRING,
-        allowNull: false
-    },
-    refreshToken: {
-        type: DataTypes.STRING
+        allowNull: false,
+        field: 'password_hash'
     },
     role: {
-        type: DataTypes.ENUM('ADMIN', 'MANAGER', 'WORKER', 'SALES'),
-        defaultValue: 'WORKER'
+        type: DataTypes.STRING,
+        defaultValue: 'WORKER',
+        field: 'global_role'
+    },
+    isActive: {
+        type: DataTypes.BOOLEAN,
+        defaultValue: true,
+        field: 'is_active'
     }
 }, {
     sequelize,
     modelName: 'User',
+    tableName: 'Zram_Users01',
+    freezeTableName: true,
+    timestamps: false,
     hooks: {
         beforeSave: async (user) => {
             if (user.changed('password')) {
@@ -88,5 +93,9 @@ User.init({
         }
     }
 });
+
+
+
+
 
 export { User };

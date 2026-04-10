@@ -23,6 +23,7 @@ export const verifyJWT = asyncHandler(async(req, _, next) => {
         }
     
         req.user = user;
+        req.user.rights = decodedToken.rights; // Attach rights to the user object
         req.companyId = decodedToken.companyId;
         req.rights = decodedToken.rights;
 

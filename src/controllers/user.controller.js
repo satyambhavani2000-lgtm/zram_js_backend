@@ -6,6 +6,8 @@ import { ApiResponse } from "../utils/ApiResponse.js";
 import jwt from "jsonwebtoken";
 import { Op } from "sequelize";
 import { UserCompany } from "../models/userCompany.model.js";
+import { sequelize } from "../db/index.js";
+import bcrypt from "bcrypt";
 
 
 const generateAccessAndRefereshTokens = async (userId, companyId, rights) => {
@@ -14,10 +16,8 @@ const generateAccessAndRefereshTokens = async (userId, companyId, rights) => {
         const accessToken = user.generateAccessToken(companyId, rights);
         const refreshToken = user.generateRefreshToken();
 
-        user.refreshToken = refreshToken;
-        await user.save();
-
         return { accessToken, refreshToken };
+
     } catch (error) {
         throw new ApiError(500, "Something went wrong while generating tokens");
     }
@@ -81,74 +81,91 @@ const registerUser = asyncHandler(async (req, res) => {
 });
 
 const loginUser = asyncHandler(async (req, res) => {
-    const { username, password, companyId } = req.body;
+    try {
+        const { username, password, companyId } = req.body;
+        const cleanUsername = username?.trim().toLowerCase() || "";
 
-    if (!companyId) {
-        throw new ApiError(400, "Company selection is required");
-    }
+        console.log(`--- LOGIN ATTEMPT: [${cleanUsername}] | COMPANY: ${companyId} ---`);
 
-    if (!username && !email) {
-        throw new ApiError(400, "username or email is required");
-    }
-
-
-
-    const user = await User.findOne({
-        where: {
-            [Op.or]: [{ username: username || "" }]
-        }
-    });
-
-    if (!user) {
-        throw new ApiError(404, "User does not exist");
-    }
-
-    const isPasswordValid = await user.isPasswordCorrect(password);
-
-    if (!isPasswordValid) {
-        throw new ApiError(401, "Invalid user credentials");
-    }
-
-    const loggedInUser = await User.findByPk(user.id, {
-        attributes: { exclude: ['password', 'refreshToken'] }
-    });
-
-    // Check if user is authorized for this company
-    const userCompany = await UserCompany.findOne({
-        where: { userId: user.id, companyId }
-    });
-
-    if (!userCompany) {
-        throw new ApiError(403, "No authorization. You are not registered with this company.");
-    }
-
-    // Generate tokens after company authorization
-    const { accessToken, refreshToken } = await generateAccessAndRefereshTokens(user.id, companyId, userCompany.rights);
-
-
-    const options = {
-        httpOnly: true,
-        secure: true
-    };
-
-    return res
-        .status(200)
-        .cookie("accessToken", accessToken, options)
-        .cookie("refreshToken", refreshToken, options)
-        .json(
-            new ApiResponse(
-                200,
-                {
-                    user: loggedInUser,
-                    accessToken,
-                    refreshToken,
-                    companyId: userCompany.companyId,
-                    rights: userCompany.rights
-                },
-                "User logged In Successfully"
-            )
-
+        // 🟢 DEBUG STEP 1: TEST RAW CONNECTION
+        const [userSearch] = await sequelize.query(
+            "SELECT id, username, password_hash, full_name, global_role FROM Zram_Users01 WHERE LOWER(TRIM(username)) = :username",
+            { replacements: { username: cleanUsername }, type: sequelize.QueryTypes.SELECT }
         );
+
+        if (!userSearch) {
+            console.log(`User [${cleanUsername}] not found in Zram_Users01`);
+            return res.status(404).json(new ApiResponse(404, null, "User does not exist"));
+        }
+
+        console.log(`User [${userSearch.username}] found. Checking password...`);
+
+        // 🟢 DEBUG STEP 2: PASSWORD CHECK (Supports both Plain Text and Bcrypt for testing)
+        let isPasswordValid = false;
+        if (password === userSearch.password_hash) {
+            isPasswordValid = true; 
+            console.log("Plain-text password match!");
+        } else {
+            try {
+                isPasswordValid = await bcrypt.compare(password, userSearch.password_hash);
+                if (isPasswordValid) console.log("Bcrypt password match!");
+            } catch (e) {
+                console.log("Bcrypt check failed (likely not a hash)");
+            }
+        }
+
+        if (!isPasswordValid) {
+            console.log("Password mismatch");
+            return res.status(401).json(new ApiResponse(401, null, "Invalid credentials"));
+        }
+
+
+        // 🟢 DEBUG STEP 3: COMPANY CHECK
+        const [authSearch] = await sequelize.query(
+            "SELECT * FROM Zram_UserCompanyAccess WHERE user_id = :userId AND company_id = :companyId",
+            { replacements: { userId: userSearch.id, companyId }, type: sequelize.QueryTypes.SELECT }
+        );
+
+        if (!authSearch) {
+            console.log("No company authorization found in Zram_UserCompanyAccess");
+            return res.status(403).json(new ApiResponse(403, null, "Not authorized for this company"));
+        }
+
+        console.log("Login Success! Generating token...");
+
+        let userRights = authSearch.rights;
+        if (typeof userRights === 'string' && userRights.trim() !== "") {
+            try { 
+                userRights = JSON.parse(userRights); 
+            } catch (e) { 
+                // Fallback: If not valid JSON, try to split by commas (e.g. "INV_VIEW, CUST_VIEW")
+                userRights = userRights.split(',').map(r => r.trim()); 
+                console.log("Parsed rights using comma-split fallback:", userRights);
+            }
+        } else if (!userRights) {
+            userRights = [];
+        }
+
+        const { accessToken, refreshToken } = await generateAccessAndRefereshTokens(userSearch.id, companyId, userRights);
+
+        const options = { httpOnly: true, secure: true };
+
+        return res
+            .status(200)
+            .cookie("accessToken", accessToken, options)
+            .cookie("refreshToken", refreshToken, options)
+            .json(new ApiResponse(200, {
+                user: { id: userSearch.id, username: userSearch.username, fullName: userSearch.full_name },
+                accessToken,
+                refreshToken,
+                rights: userRights
+            }, "Login successful"));
+
+    } catch (error) {
+        console.error("!!! LOGIN CRASH !!!");
+        console.error(error);
+        res.status(500).json(new ApiResponse(500, null, error.message || "Internal Login Error"));
+    }
 });
 
 const logoutUser = asyncHandler(async (req, res) => {

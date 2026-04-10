@@ -9,31 +9,21 @@ Menu.init({
         defaultValue: DataTypes.UUIDV4,
         primaryKey: true
     },
-    label: {
+    menuName: {
         type: DataTypes.STRING,
         allowNull: false
     },
-    path: {
+    parentMenuId: {
+        type: DataTypes.UUID,
+        allowNull: true
+    },
+    route: {
         type: DataTypes.STRING,
         allowNull: true
     },
     icon: {
         type: DataTypes.STRING,
-        allowNull: true,
-        comment: 'Stores MUI icon name e.g. DashboardIcon'
-    },
-    requiredRight: {
-        type: DataTypes.STRING,
-        allowNull: true,
-        comment: 'Matches rights array in UserCompanyAccess'
-    },
-    parentId: {
-        type: DataTypes.UUID,
-        allowNull: true,
-        references: {
-            model: 'Menus',
-            key: 'id'
-        }
+        allowNull: true
     },
     order: {
         type: DataTypes.INTEGER,
@@ -45,7 +35,9 @@ Menu.init({
     }
 }, {
     sequelize,
-    modelName: 'Menu'
+    modelName: 'Menu',
+    tableName: 'Zram_Menus',
+    freezeTableName: true
 });
 
 export { Menu };

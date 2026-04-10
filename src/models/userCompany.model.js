@@ -12,19 +12,23 @@ UserCompany.init({
     userId: {
         type: DataTypes.UUID,
         allowNull: false,
+        field: 'user_id',
         references: {
-            model: 'Users',
+            model: 'Zram_Users01',
             key: 'id'
         }
     },
     companyId: {
         type: DataTypes.UUID,
         allowNull: false,
+        field: 'company_id',
         references: {
-            model: 'Companies',
+            model: 'Zram_Companies',
             key: 'id'
         }
     },
+
+
     rights: {
         type: DataTypes.JSON, // Stores an array of menu rights e.g., ["DASHBOARD", "INVENTORY", "PRODUCTION"]
         defaultValue: []
@@ -35,7 +39,13 @@ UserCompany.init({
     }
 }, {
     sequelize,
-    modelName: 'UserCompany'
+    modelName: 'UserCompany',
+    tableName: 'Zram_UserCompanyAccess',
+    freezeTableName: true,
+    underscored: true
 });
+
+
+
 
 export { UserCompany };
