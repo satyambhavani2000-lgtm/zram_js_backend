@@ -2,9 +2,9 @@ import { Sequelize } from "sequelize";
 import { DB_NAME } from "../constants.js";
 
 const sequelize = new Sequelize(
-    process.env.DB_DATABASE, 
-    process.env.DB_USERNAME, 
-    process.env.DB_PASSWORD, 
+    process.env.DB_DATABASE,
+    process.env.DB_USERNAME,
+    process.env.DB_PASSWORD,
     {
         host: process.env.DB_SERVER,
         dialect: 'mssql',
@@ -26,7 +26,7 @@ const connectDB = async () => {
         await sequelize.authenticate();
         console.log(`\n SQL Server connected !! DB HOST: ${process.env.DB_SERVER} | DATABASE: ${process.env.DB_DATABASE}`);
 
-        
+
         // Controlled synchronization
         if (process.env.DB_SYNC === 'true') {
             console.log("Synchronizing models...");

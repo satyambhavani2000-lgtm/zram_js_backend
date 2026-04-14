@@ -147,13 +147,30 @@ const loginUser = asyncHandler(async (req, res) => {
 
 
         // 🔵 STEP 2: Fetch specific company access and rights
+        let effectiveCompanyId = companyId;
+
+        // If no companyId provided, find the FIRST active company the user has access to
+        if (!effectiveCompanyId) {
+            const [firstCompany] = await sequelize.query(
+                "SELECT [company_id] FROM [Zram_UserCompanyAccess] WHERE [user_id] = :userId AND [is_active] = 1",
+                { replacements: { userId: userSearch.id }, type: sequelize.QueryTypes.SELECT }
+            );
+            
+            if (!firstCompany) {
+                console.log(`User [${cleanUsername}] has no active company assignments`);
+                return res.status(403).json(new ApiResponse(403, null, "Your account has no active company assignments. Please contact admin."));
+            }
+            effectiveCompanyId = firstCompany.company_id;
+            console.log(`Auto-selected default Company [${effectiveCompanyId}] for user [${cleanUsername}]`);
+        }
+
         const [authSearch] = await sequelize.query(
             "SELECT * FROM [Zram_UserCompanyAccess] WHERE [user_id] = :userId AND [company_id] = :companyId",
-            { replacements: { userId: userSearch.id, companyId }, type: sequelize.QueryTypes.SELECT }
+            { replacements: { userId: userSearch.id, companyId: effectiveCompanyId }, type: sequelize.QueryTypes.SELECT }
         );
 
         if (!authSearch) {
-            console.log(`User [${cleanUsername}] has no access record for Company [${companyId}]`);
+            console.log(`User [${cleanUsername}] has no access record for Company [${effectiveCompanyId}]`);
             return res.status(403).json(new ApiResponse(403, null, "You do not have access to this company"));
         }
 
@@ -170,7 +187,7 @@ const loginUser = asyncHandler(async (req, res) => {
 
         const { accessToken, refreshToken } = await generateAccessAndRefereshTokens(
             userSearch.id, 
-            companyId, 
+            effectiveCompanyId, 
             userRights || []
         );
 
@@ -184,11 +201,15 @@ const loginUser = asyncHandler(async (req, res) => {
             .cookie("refreshToken", refreshToken, options)
             .json(new ApiResponse(200, {
                 user: { id: userSearch.id, username: userSearch.username, fullName: userSearch.full_name },
-                companyId,
+                companyId: effectiveCompanyId,
                 role: authSearch.company_role, // Using company_role instead of role
                 rights: userRights || [],
                 accessToken,
-                refreshToken
+                refreshToken,
+                accessibleCompanies: await sequelize.query(
+                    "SELECT c.id, c.company_name as companyName, uca.company_role as role FROM Zram_UserCompanyAccess uca JOIN Zram_Companies c ON uca.company_id = c.id WHERE uca.user_id = :userId AND uca.is_active = 1",
+                    { replacements: { userId: userSearch.id }, type: sequelize.QueryTypes.SELECT }
+                )
             }, "Login successful"));
 
     } catch (error) {
@@ -396,6 +417,55 @@ const assignUserRole = asyncHandler(async (req, res) => {
     }
 });
 
+const switchCompany = asyncHandler(async (req, res) => {
+    const { companyId } = req.body;
+    const userId = req.user.id;
+
+    if (!companyId) {
+        throw new ApiError(400, "Company ID is required");
+    }
+
+    // Check if user has access to the new company
+    const [authSearch] = await sequelize.query(
+        "SELECT * FROM [Zram_UserCompanyAccess] WHERE [user_id] = :userId AND [company_id] = :companyId AND [is_active] = 1",
+        { replacements: { userId, companyId }, type: sequelize.QueryTypes.SELECT }
+    );
+
+    if (!authSearch) {
+        throw new ApiError(403, "You do not have access to this company");
+    }
+
+    let userRights = authSearch.rights_json;
+    if (typeof userRights === 'string' && userRights.trim() !== "") {
+        try {
+            userRights = JSON.parse(userRights);
+        } catch (e) {
+            userRights = [];
+        }
+    }
+
+    const { accessToken, refreshToken } = await generateAccessAndRefereshTokens(
+        userId,
+        companyId,
+        userRights || []
+    );
+
+    const options = { httpOnly: true, secure: true };
+
+    return res
+        .status(200)
+        .cookie("accessToken", accessToken, options)
+        .cookie("refreshToken", refreshToken, options)
+        .json(new ApiResponse(200, {
+            user: { id: req.user.id, username: req.user.username, fullName: req.user.fullName },
+            companyId,
+            role: authSearch.company_role,
+            rights: userRights || [],
+            accessToken,
+            refreshToken
+        }, "Company switched successfully"));
+});
+
 const getAllUsers = asyncHandler(async (req, res) => {
     const users = await User.findAll({
         attributes: { exclude: ['password', 'refreshToken'] }
@@ -414,5 +484,6 @@ export {
     updateUserAvatar,
     updateUserCoverImage,
     assignUserRole,
-    getAllUsers
+    getAllUsers,
+    switchCompany
 };
