@@ -10,27 +10,26 @@ const getUserMenu = asyncHandler(async (req, res) => {
     try {
         const userRights = req.user.rights || []; // Injected by auth middleware
         
-        console.log(`Fetching menus for rights: ${JSON.stringify(userRights)}`);
+        console.log(`Fetching menus for user: ${req.user.username}, role: ${req.user.role}`);
 
-        // We fetch whether the menu has children to show the dropdown arrow (hasSubmenu)
+        // Using the new schema column names: menuName, route, parentMenuId, displayOrder
         const [menus] = await sequelize.query(`
             SELECT 
                 m.id, 
-                m.label, 
-                m.path, 
-                m.icon_name as icon, 
-                m.parent_id as parentId, 
-                m.required_right as requiredRight,
-                CASE WHEN EXISTS (SELECT 1 FROM Zram_Menus sub WHERE sub.parent_id = m.id) THEN 1 ELSE 0 END as hasSubmenu
+                m.menuName, 
+                m.route, 
+                m.icon, 
+                m.parentMenuId as parentId, 
+                m.requiredRight as requiredRight,
+                CASE WHEN EXISTS (SELECT 1 FROM Zram_Menus sub WHERE sub.parentMenuId = m.id) THEN 1 ELSE 0 END as hasSubmenu
             FROM Zram_Menus m
-            WHERE m.is_active = 1
-            ORDER BY m.display_order ASC
+            WHERE m.isActive = 1
+            ORDER BY m.displayOrder ASC
         `);
-
 
         // Filter menus based on user rights
         // 1. If user is a global 'ADMIN', show everything
-        // 2. Otherwise, check if menu is public (no requiredRight) or user has the specific right
+        // 2. Otherwise, check if user has specific rights assigned
         const authorizedMenus = menus.filter(menu => {
             if (req.user.role === 'ADMIN') return true; 
             if (!menu.requiredRight) return true;
@@ -41,9 +40,39 @@ const getUserMenu = asyncHandler(async (req, res) => {
             new ApiResponse(200, authorizedMenus, "Authorized menus fetched successfully")
         );
     } catch (error) {
-        console.error("Error fetching user menu:", error.message);
+        console.log("Error fetching user menu:", error.message);
         res.status(500).json(new ApiResponse(500, null, "Failed to load menus"));
     }
 });
 
-export { getUserMenu };
+const getAllMenus = asyncHandler(async (req, res) => {
+    try {
+        const [menus] = await sequelize.query(`
+            SELECT id, menuName, route, icon, parentMenuId as parentId, requiredRight, displayOrder, isActive
+            FROM Zram_Menus
+            ORDER BY displayOrder ASC
+        `);
+        return res.status(200).json(new ApiResponse(200, menus, "All menus fetched successfully"));
+    } catch (error) {
+        res.status(500).json(new ApiResponse(500, null, "Failed to load menus"));
+    }
+});
+
+const getAccessStats = asyncHandler(async (req, res) => {
+    try {
+        const [stats] = await sequelize.query(`
+            SELECT 
+                (SELECT COUNT(*) FROM Zram_Menus WHERE isActive = 1) as totalMenus,
+                (SELECT COUNT(*) FROM Zram_Users01 WHERE is_active = 1) as totalEmployees,
+                (SELECT COUNT(*) FROM Zram_UserCompanyAccess WHERE is_active = 1) as totalAssignments,
+                (SELECT COUNT(*) FROM Zram_Menus WHERE parentMenuId IS NULL AND isActive = 1) as level1Menus,
+                (SELECT COUNT(*) FROM Zram_Menus WHERE parentMenuId IN (SELECT id FROM Zram_Menus WHERE parentMenuId IS NULL) AND isActive = 1) as level2Menus,
+                (SELECT COUNT(*) FROM Zram_Menus WHERE parentMenuId IN (SELECT id FROM Zram_Menus WHERE parentMenuId IN (SELECT id FROM Zram_Menus WHERE parentMenuId IS NULL)) AND isActive = 1) as level3Menus
+        `);
+        return res.status(200).json(new ApiResponse(200, stats[0], "Access stats fetched successfully"));
+    } catch (error) {
+        res.status(500).json(new ApiResponse(500, null, "Failed to load access stats"));
+    }
+});
+
+export { getUserMenu, getAllMenus, getAccessStats };

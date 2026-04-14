@@ -8,6 +8,7 @@ import { Op } from "sequelize";
 import { UserCompany } from "../models/userCompany.model.js";
 import { sequelize } from "../db/index.js";
 import bcrypt from "bcrypt";
+import crypto from "crypto";
 
 
 const generateAccessAndRefereshTokens = async (userId, companyId, rights) => {
@@ -25,7 +26,7 @@ const generateAccessAndRefereshTokens = async (userId, companyId, rights) => {
 
 
 const registerUser = asyncHandler(async (req, res) => {
-    const { fullName, email, username, password, role } = req.body;
+    const { fullName, email, username, password, role, companyId } = req.body;
 
     if ([fullName, email, username, password].some((field) => field?.trim() === "")) {
         throw new ApiError(400, "All fields are required");
@@ -42,42 +43,67 @@ const registerUser = asyncHandler(async (req, res) => {
     }
 
     const avatarLocalPath = req.files?.avatar?.[0]?.path;
-    let coverImageLocalPath;
-    if (req.files && Array.isArray(req.files.coverImage) && req.files.coverImage.length > 0) {
-        coverImageLocalPath = req.files.coverImage[0].path;
+    const coverImageLocalPath = req.files?.coverImage?.[0]?.path;
+
+    let avatar = { url: "" };
+    if (avatarLocalPath) {
+        avatar = await uploadOnCloudinary(avatarLocalPath);
+        if (!avatar) {
+            throw new ApiError(400, "Avatar file upload failed");
+        }
     }
 
-    if (!avatarLocalPath) {
-        throw new ApiError(400, "Avatar file is required");
+    let coverImage = { url: "" };
+    if (coverImageLocalPath) {
+        coverImage = await uploadOnCloudinary(coverImageLocalPath);
     }
 
-    const avatar = await uploadOnCloudinary(avatarLocalPath);
-    const coverImage = await uploadOnCloudinary(coverImageLocalPath);
+    const t = await sequelize.transaction();
 
-    if (!avatar) {
-        throw new ApiError(400, "Avatar file is required");
+    try {
+        const user = await User.create({
+            fullName,
+            avatar: avatar.url,
+            coverImage: coverImage?.url || "",
+            password,
+            username: username.toLowerCase(),
+            role: role || 'WORKER'
+        }, { transaction: t });
+
+        // If companyId is provided, link the user to this company automatically
+        if (companyId) {
+            await sequelize.query(
+                "INSERT INTO Zram_UserCompanyAccess (id, user_id, company_id, role, rights, isActive) VALUES (:id, :userId, :companyId, :role, :rights, 1)",
+                {
+                    replacements: {
+                        id: crypto.randomUUID(),
+                        userId: user.id,
+                        companyId: companyId,
+                        role: role || 'WORKER',
+                        rights: JSON.stringify([])
+                    },
+                    transaction: t
+                }
+            );
+        }
+
+        await t.commit();
+
+        const createdUser = await User.findByPk(user.id, {
+            attributes: { exclude: ['password', 'refreshToken'] }
+        });
+
+        if (!createdUser) {
+            throw new ApiError(500, "Something went wrong while registering the user");
+        }
+
+        return res.status(201).json(
+            new ApiResponse(200, createdUser, "User registered Successfully")
+        );
+    } catch (error) {
+        await t.rollback();
+        throw new ApiError(500, error.message || "Something went wrong while registering the user");
     }
-
-    const user = await User.create({
-        fullName,
-        avatar: avatar.url,
-        coverImage: coverImage?.url || "",
-        password,
-        username: username.toLowerCase(),
-        role: role || 'WORKER'
-    });
-
-    const createdUser = await User.findByPk(user.id, {
-        attributes: { exclude: ['password', 'refreshToken'] }
-    });
-
-    if (!createdUser) {
-        throw new ApiError(500, "Something went wrong while registering the user");
-    }
-
-    return res.status(201).json(
-        new ApiResponse(200, createdUser, "User registered Successfully")
-    );
 });
 
 const loginUser = asyncHandler(async (req, res) => {
@@ -120,33 +146,35 @@ const loginUser = asyncHandler(async (req, res) => {
         }
 
 
-        // 🟢 DEBUG STEP 3: COMPANY CHECK
+        // 🔵 STEP 2: Fetch specific company access and rights
         const [authSearch] = await sequelize.query(
-            "SELECT * FROM Zram_UserCompanyAccess WHERE user_id = :userId AND company_id = :companyId",
+            "SELECT * FROM [Zram_UserCompanyAccess] WHERE [user_id] = :userId AND [company_id] = :companyId",
             { replacements: { userId: userSearch.id, companyId }, type: sequelize.QueryTypes.SELECT }
         );
 
         if (!authSearch) {
-            console.log("No company authorization found in Zram_UserCompanyAccess");
-            return res.status(403).json(new ApiResponse(403, null, "Not authorized for this company"));
+            console.log(`User [${cleanUsername}] has no access record for Company [${companyId}]`);
+            return res.status(403).json(new ApiResponse(403, null, "You do not have access to this company"));
         }
 
-        console.log("Login Success! Generating token...");
-
-        let userRights = authSearch.rights;
+        // Use the correct column name 'rights_json'
+        let userRights = authSearch.rights_json;
         if (typeof userRights === 'string' && userRights.trim() !== "") {
-            try { 
-                userRights = JSON.parse(userRights); 
-            } catch (e) { 
-                // Fallback: If not valid JSON, try to split by commas (e.g. "INV_VIEW, CUST_VIEW")
-                userRights = userRights.split(',').map(r => r.trim()); 
-                console.log("Parsed rights using comma-split fallback:", userRights);
+            try {
+                userRights = JSON.parse(userRights);
+            } catch (e) {
+                console.error("Failed to parse rights_json string", e);
+                userRights = [];
             }
-        } else if (!userRights) {
-            userRights = [];
         }
 
-        const { accessToken, refreshToken } = await generateAccessAndRefereshTokens(userSearch.id, companyId, userRights);
+        const { accessToken, refreshToken } = await generateAccessAndRefereshTokens(
+            userSearch.id, 
+            companyId, 
+            userRights || []
+        );
+
+        console.log(`Login SUCCESS for [${cleanUsername}]`);
 
         const options = { httpOnly: true, secure: true };
 
@@ -156,9 +184,11 @@ const loginUser = asyncHandler(async (req, res) => {
             .cookie("refreshToken", refreshToken, options)
             .json(new ApiResponse(200, {
                 user: { id: userSearch.id, username: userSearch.username, fullName: userSearch.full_name },
+                companyId,
+                role: authSearch.company_role, // Using company_role instead of role
+                rights: userRights || [],
                 accessToken,
-                refreshToken,
-                rights: userRights
+                refreshToken
             }, "Login successful"));
 
     } catch (error) {
@@ -312,6 +342,67 @@ const updateUserCoverImage = asyncHandler(async (req, res) => {
     return res.status(200).json(new ApiResponse(200, updatedUser, "Cover image updated successfully"));
 });
 
+const assignUserRole = asyncHandler(async (req, res) => {
+    const { userId, companyId, roleName, rights } = req.body;
+
+    if (!userId || !companyId || !roleName) {
+        throw new ApiError(400, "User ID, Company ID, and Role Name are required");
+    }
+
+    try {
+        console.log(`Step 1: Checking access for User:${userId} Company:${companyId}`);
+        // 1. Check if the mapping already exists
+        const [existingAccess] = await sequelize.query(
+            "SELECT [id] FROM [Zram_UserCompanyAccess] WHERE [user_id] = :userId AND [company_id] = :companyId",
+            { replacements: { userId, companyId }, type: sequelize.QueryTypes.SELECT }
+        );
+
+        if (existingAccess) {
+            console.log("Step 2: Updating existing record");
+            // Update using correct column names
+            await sequelize.query(
+                "UPDATE [Zram_UserCompanyAccess] SET [company_role] = :roleName, [rights_json] = :rights WHERE [user_id] = :userId AND [company_id] = :companyId",
+                { replacements: { userId, companyId, roleName, rights: JSON.stringify(rights || []) } }
+            );
+        } else {
+            console.log("Step 2: Inserting new record");
+            await sequelize.query(
+                "INSERT INTO [Zram_UserCompanyAccess] ([id], [user_id], [company_id], [company_role], [rights_json], [is_active]) VALUES (NEWID(), :userId, :companyId, :role, :rights, 1)",
+                { replacements: { userId, companyId, role: roleName, rights: JSON.stringify(rights || []) } }
+            );
+        }
+
+        console.log("Step 3: Updating global role");
+        await sequelize.query(
+            "UPDATE [Zram_Users01] SET [global_role] = :roleName WHERE [id] = :userId",
+            { replacements: { userId, roleName } }
+        );
+
+        return res.status(200).json(new ApiResponse(200, null, "Role assigned successfully"));
+    } catch (error) {
+        console.error("CRITICAL: Role Assignment Failed:", error);
+        
+        // Capture the underlying SQL error which contains the ACTUAL reason (e.g. invalid column)
+        let originalError = "";
+        if (error.original && error.original.errors) {
+            originalError = error.original.errors.map(e => e.message).join(" | ");
+        } else if (error.original) {
+            originalError = error.original.message || JSON.stringify(error.original);
+        }
+        
+        const detailedError = error.message || JSON.stringify(error);
+        
+        throw new ApiError(500, `DB Assignment Error: ${detailedError} | Original: ${originalError}`);
+    }
+});
+
+const getAllUsers = asyncHandler(async (req, res) => {
+    const users = await User.findAll({
+        attributes: { exclude: ['password', 'refreshToken'] }
+    });
+    return res.status(200).json(new ApiResponse(200, users, "Users fetched successfully"));
+});
+
 export {
     registerUser,
     loginUser,
@@ -322,4 +413,6 @@ export {
     updateAccountDetails,
     updateUserAvatar,
     updateUserCoverImage,
+    assignUserRole,
+    getAllUsers
 };
