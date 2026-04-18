@@ -24,6 +24,7 @@ import companyRouter from "./routes/company.routes.js"
 import menuRouter from "./routes/menu.routes.js"
 import roleRouter from "./routes/role.routes.js"
 import accessRouter from "./routes/access.routes.js"
+import designRouter from "./routes/designFile.routes.js"
 
 //routes declaration
 app.use("/api/v1/users", userRouter)
@@ -34,6 +35,7 @@ app.use("/api/v1/companies", companyRouter)
 app.use("/api/v1/menu", menuRouter)
 app.use("/api/v1/roles", roleRouter)
 app.use("/api/v1/access", accessRouter)
+app.use("/api/v1/designs", designRouter)
 
 
 
